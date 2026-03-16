@@ -2,6 +2,10 @@
 
 A Python daemon that monitors a directory for Datadog alert `.txt` files, parses metadata, aggregates alerts by elapsed-time periods (e.g. hourly), stores them in SQLite, and posts formatted summaries to Microsoft Teams.
 
+## Overview
+
+This agent is designed for teams that receive Datadog alerts as email (or exported `.txt` files, e.g. via OneDrive). It watches a configurable folder, parses each new alert file to extract **operation**, **service**, **severity**, **threshold**, **time window**, **occurrence count**, and **affected pages**, then stores them in a local SQLite database. On a configurable interval (e.g. every 1 hour), it aggregates alerts into period summaries, computes trends vs. the previous period, and posts a formatted report to a Microsoft Teams channel via an incoming webhook. Processed files are moved to `archive/`; parse failures go to `failed/` for inspection.
+
 ## 🎯 Features
 
 - **Automated File Monitoring**: Uses `watchdog` to detect new `.txt` files in real-time
@@ -16,9 +20,9 @@ A Python daemon that monitors a directory for Datadog alert `.txt` files, parses
 
 ## 📋 Requirements
 
-- **Python**: 3.9 or higher
-- **OneDrive** (or any folder): Directory containing Datadog alert `.txt` files
-- **Microsoft Teams**: Incoming webhook URL for posting summaries
+- **Python**: 3.9 or higher (uses `zoneinfo` for timezone-aware period labels)
+- **Watch directory**: Folder containing Datadog alert `.txt` files (e.g. OneDrive-synced)
+- **Microsoft Teams**: Incoming webhook URL for posting period summaries
 
 ## 🚀 Quick Start
 
@@ -57,6 +61,12 @@ AGGREGATION_PERIOD=1h
 # How long to keep alert history (days)
 HISTORY_RETENTION_DAYS=7
 
+# Summary mode: full (detailed per-alert breakdown) or simple (time lines + table: alert name, page(s), count, related logs)
+SUMMARY_MODE=full
+
+# When using simple mode: if true, table has one row per (alert, page); if false, one row per alert with comma-separated pages
+SUMMARY_TABLE_GROUP_BY_PAGE=false
+
 # Set to true to log summaries without posting to Teams
 DRY_RUN=false
 ```
@@ -92,6 +102,26 @@ Aggregator initialized. Will report every 3600.0 seconds
 Started monitoring: /path/to/datadog-alert-emails
 Press Ctrl+C to stop
 ```
+
+## ⚙️ Configuration Reference
+
+All settings are read from `.env` (copy from `.env.example`). Every option is listed below.
+
+| Variable | Description | Default / Example |
+|:---------|:------------|:-----------------|
+| **TEAMS_WEBHOOK_URL** | Microsoft Teams incoming webhook URL (Channel → Connectors → Incoming Webhook) | Required; no default |
+| **WATCH_DIR** | Directory to watch for Datadog alert `.txt` files (e.g. OneDrive-synced folder). Supports `~` for home. | Required |
+| **AGGREGATION_PERIOD** | How often to aggregate and post a period summary. Elapsed-time since last report, not calendar boundaries. | `1h`; also `30m`, `2h`, `6h`, `24h`, `1d` |
+| **HISTORY_RETENTION_DAYS** | Days of alert/period history to keep in SQLite; older records are deleted on cleanup. | `7` |
+| **SUMMARY_MODE** | Format of the period summary posted to Teams: `full` (detailed per-alert breakdown) or `simple` (time lines + compact table). | `full` |
+| **SUMMARY_TABLE_GROUP_BY_PAGE** | Only applies when `SUMMARY_MODE=simple`. If `true`, table has one row per (alert, page); if `false`, one row per alert with comma-separated pages. | `false` |
+| **DRY_RUN** | If `true`, summaries are logged but not posted to Teams. Use for testing. | `false` |
+
+### Summary modes: full vs simple
+
+- **Full mode** (`SUMMARY_MODE=full`): Each aggregated (operation, service) gets a detailed breakdown—counts, trend vs previous period, affected pages, and per-alert details. Best for thorough review.
+- **Simple mode** (`SUMMARY_MODE=simple`): Shorter report with period time lines (in configured timezones) and a single table: alert name, affected page(s), count, and related logs link. Less verbose for high-volume channels.
+  - **SUMMARY_TABLE_GROUP_BY_PAGE**: In simple mode, set to `true` for one table row per (alert, page), or `false` for one row per alert with pages in a comma-separated list.
 
 ## 🏗️ Architecture
 
@@ -130,11 +160,40 @@ watch_dir/
 |:----------|:--------------|:--------|
 | **File Monitor** | `DatadogAlertHandler` | Watchdog handler for `.txt` creation; ignores archive/ and failed/ |
 | **Stabilization** | `wait_for_file_stability()` | Waits for file size to be stable before reading |
-| **Parser** | `alert_parser.parse_alert()` | Extracts operation, service, severity, condition, count, time_window, affected_pages |
+| **Parser** | `alert_parser.parse_alert()` | Extracts operation, service, severity, condition, count, time_window, affected_pages, related_logs_url |
 | **Aggregation** | `PeriodAggregator.check_and_report()` | Elapsed-time windows; aggregates and posts every N seconds |
 | **Teams Posting** | `send_to_teams()` | Office 365 Message Card, 3 retries with exponential backoff |
-| **Database** | `database` module | SQLite: alerts, alert_periods, page_correlations; cleanup by retention |
+| **Database** | `database` module | SQLite: alerts, alert_periods, page_correlations, agent_state, posted_periods; cleanup by retention |
 | **Logging** | `setup_logging()` | Rotating file (10MB, 5 backups) + console |
+
+### Database Schema
+
+The SQLite database (`alerts.db`) is created from `schema.sql` and includes:
+
+| Table | Purpose |
+|:------|:--------|
+| **alerts** | Raw parsed alerts: operation, service, alert_type, severity, condition, occurrence_count, time_window, affected_pages, status, related_logs_url, file_name, raw_content |
+| **alert_periods** | Aggregated counts per (period_start, period_end, operation, service) with trend_delta and trend_direction |
+| **page_correlations** | Maps (operation, service) to affected pages with frequency and last_seen |
+| **agent_state** | Key-value store (e.g. `last_report_time`) for elapsed-time reporting across restarts |
+| **posted_periods** | Tracks (period_start, period_end) already posted to Teams for idempotent posting |
+
+### Project Structure
+
+| Path | Description |
+|:-----|:------------|
+| `agent.py` | Main entry point: file watcher, stabilization, parsing, aggregation loop, Teams posting, signal handling, PID lock |
+| `alert_parser.py` | Parses raw alert text: subject, pages, threshold, time window, count, related logs URL |
+| `aggregator.py` | Period boundaries, aggregation by (operation, service), trend calculation, markdown summary generation (full/simple) |
+| `database.py` | DB init, insert/query alerts and periods, page correlations, retention cleanup, last report time and posted-period tracking |
+| `schema.sql` | SQLite table and index definitions |
+| `test_with_review.sh` | Runs agent in DRY_RUN with timeout for quick validation |
+| `test_summary_from_dirs.py` | Builds summary from directories of `.txt` files (no watcher) |
+| `test_with_archive.py` | Tests processing with archive/failed layout |
+| `diagnose_unknown_alerts.py` | Inspects raw content of alerts for debugging parse issues |
+| `logs/` | Rotating `agent.log` (10MB, 5 backups) |
+| `alerts.db` | SQLite DB (created at runtime) |
+| `agent.pid` | PID file for single-instance lock |
 
 ## 🧪 Testing
 
@@ -159,6 +218,16 @@ Create a test file in the watch directory and watch logs:
 echo "Subject: [P3] High Duration Alert: getCart" > "$WATCH_DIR/test_alert.txt"
 tail -f logs/agent.log
 ```
+
+### Dry-run test script
+
+Run the agent in DRY_RUN for a short time without posting to Teams:
+
+```bash
+./test_with_review.sh
+```
+
+Output is written to `test_output.log`; the script cleans the DB and PID file before running.
 
 ## 📊 Logging
 
@@ -220,15 +289,14 @@ Use a plist with `ProgramArguments`, `WorkingDirectory`, and `StandardOutPath`/`
 
 | Package | Purpose |
 |:--------|:--------|
-| `watchdog` | Filesystem monitoring |
-| `requests` | Teams webhook HTTP |
-| `python-dotenv` | Load `.env` |
+| `watchdog` | Filesystem monitoring for new `.txt` files |
+| `requests` | HTTP POST to Teams incoming webhook |
+| `python-dotenv` | Load `.env` configuration |
+
+Standard library: `sqlite3`, `logging`, `pathlib`, `signal`, `zoneinfo` (Python 3.9+).
 
 ## 📄 License
 
 Internal use only - Visionet Systems Inc.
 
----
-
 **Last Updated**: March 2026
-# alert-summary
