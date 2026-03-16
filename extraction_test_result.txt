@@ -1,0 +1,48 @@
+Testing extraction functions on 11 alert files:
+
+File: AAMkAGE4NzFlMWJiLWRlMTQtNDA3Mi1hNTFhLWNkMTRkN2EyMz...
+  API Operation: GetAddressFromZipCode
+  Service: buy-www.mattressfirm-com.vercel.app
+  Path/Pages: ['cart']
+  Threshold: >500ms (0.5 seconds)
+  Time Window: Last 1 hour
+  Count: 10.0
+  Status: ACTIVE
+
+File: AAMkAGE4NzFlMWJiLWRlMTQtNDA3Mi1hNTFhLWNkMTRkN2EyMz...
+  API Operation: removeCartLines
+  Service: buy-www.mattressfirm-com.vercel.app
+  Path/Pages: ['cart', 'removecart']
+  Threshold: >1500ms (1.5 seconds)
+  Time Window: Last 1 hour
+  Count: 11.0
+  Status: ACTIVE
+
+File: AAMkAGE4NzFlMWJiLWRlMTQtNDA3Mi1hNTFhLWNkMTRkN2EyMz...
+  API Operation: removeCartLines
+  Service: buy-www.mattressfirm-com.vercel.app
+  Path/Pages: ['cart', 'removecart']
+  Threshold: >1500ms (1.5 seconds)
+  Time Window: Last 1 hour
+  Count: 10.0
+  Status: ACTIVE
+
+File: AAMkAGE4NzFlMWJiLWRlMTQtNDA3Mi1hNTFhLWNkMTRkN2EyMz...
+  API Operation: GetAddressFromZipCode
+  Service: buy-www.mattressfirm-com.vercel.app
+  Path/Pages: ['cart']
+  Threshold: >500ms (0.5 seconds)
+  Time Window: Last 1 hour
+  Count: 4.0
+  Status: ACTIVE
+
+File: AAMkAGE4NzFlMWJiLWRlMTQtNDA3Mi1hNTFhLWNkMTRkN2EyMz...
+  API Operation: removeCartLines
+  Service: buy-www.mattressfirm-com.vercel.app
+  Path/Pages: ['cart', 'removecart']
+  Threshold: >1500ms (1.5 seconds)
+  Time Window: Last 1 hour
+  Count: 7.0
+  Status: ACTIVE
+
+✅ Extraction test completed!

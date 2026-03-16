@@ -1,0 +1,110 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║  TESTING EXTRACTION AND AGGREGATION WITH NEW FIELDS                      ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+Step 1: Parsing alerts from files...
+--------------------------------------------------------------------------------
+✓ GetAddressFromZipCode     | Last 1 hour          | Count: 10
+✓ removeCartLines           | Last 1 hour          | Count: 11
+✓ removeCartLines           | Last 1 hour          | Count: 10
+✓ GetAddressFromZipCode     | Last 1 hour          | Count: 4
+✓ removeCartLines           | Last 1 hour          | Count: 7
+✓ GetCartRelatedProducts    | Last 2 hour          | Count: 10
+✓ checkout                  | Last 1 day           | Count: 0
+✓ GetCartDelivery           | Last 2 hour          | Count: 0
+
+📊 Parsed 8 alerts
+
+Step 2: Aggregating alerts by period...
+--------------------------------------------------------------------------------
+Period: 2026-03-10 21:00:00 -> 2026-03-11 00:00:00
+Found 5 unique API/Service combinations
+
+Step 3: Generating aggregation summary (with NEW fields)...
+--------------------------------------------------------------------------------
+
+📊 **Alert Summary: 2026-03-10 21:00 - 00:00**
+
+🚨 **P3 - GetAddressFromZipCode** 🆕
+* **Service:** `buy-www.mattressfirm-com.vercel.app`
+* **Alert Count:** 2 alerts occurred (First detected)
+* **Total Occurrences:** 14
+* **Affected Pages:** cart
+* **Threshold:** >500ms (0.5 seconds)
+* **Time Window:** Last 1 hour
+* **Trend:** New
+
+🚨 **P3 - GetCartDelivery** 🆕
+* **Service:** `buy-www.mattressfirm-com.vercel.app`
+* **Alert Count:** 1 alerts occurred (First detected)
+* **Total Occurrences:** 0
+* **Affected Pages:** cart, getcart
+* **Threshold:** >4000ms (4 seconds)
+* **Time Window:** Last 2 hour
+* **Trend:** New
+
+🚨 **P3 - GetCartRelatedProducts** 🆕
+* **Service:** `buy-www.mattressfirm-com.vercel.app`
+* **Alert Count:** 1 alerts occurred (First detected)
+* **Total Occurrences:** 10
+* **Affected Pages:** cart, getcart
+* **Threshold:** >7500ms (7.5 seconds)
+* **Time Window:** Last 2 hour
+* **Trend:** New
+
+🚨 **P3 - checkout** 🆕
+* **Service:** `buy-www.mattressfirm-com.vercel.app`
+* **Alert Count:** 1 alerts occurred (First detected)
+* **Total Occurrences:** 0
+* **Affected Pages:** applepay-express
+* **Threshold:** 1.5
+* **Time Window:** Last 1 day
+* **Trend:** New
+
+🚨 **P3 - removeCartLines** 🆕
+* **Service:** `buy-www.mattressfirm-com.vercel.app`
+* **Alert Count:** 3 alerts occurred (First detected)
+* **Total Occurrences:** 28
+* **Affected Pages:** cart, removecart
+* **Threshold:** >1500ms (1.5 seconds)
+* **Time Window:** Last 1 hour
+* **Trend:** New
+
+---
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+║  VERIFICATION CHECKLIST                                                 ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+  ✓ GetAddressFromZipCode     has Count: True
+  ✓ GetAddressFromZipCode     has Pages: True
+  ✓ GetAddressFromZipCode     has Threshold: True
+  ✓ GetAddressFromZipCode     has Time Window: True
+  ✓ GetCartDelivery           has Count: True
+  ✓ GetCartDelivery           has Pages: True
+  ✓ GetCartDelivery           has Threshold: True
+  ✓ GetCartDelivery           has Time Window: True
+  ✓ GetCartRelatedProducts    has Count: True
+  ✓ GetCartRelatedProducts    has Pages: True
+  ✓ GetCartRelatedProducts    has Threshold: True
+  ✓ GetCartRelatedProducts    has Time Window: True
+  ✓ checkout                  has Count: True
+  ✓ checkout                  has Pages: True
+  ✓ checkout                  has Threshold: True
+  ✓ checkout                  has Time Window: True
+  ✓ removeCartLines           has Count: True
+  ✓ removeCartLines           has Pages: True
+  ✓ removeCartLines           has Threshold: True
+  ✓ removeCartLines           has Time Window: True
+
+✅ EXTRACTION IMPLEMENTATION COMPLETE!
+
+Summary of implemented features:
+  1. ✅ extract_threshold_from_alert() - Extracts Duration/Threshold fields
+  2. ✅ extract_time_window_from_alert() - Extracts Time Window fields
+  3. ✅ extract_count_from_alert() - Extracts Count/occurrence fields
+  4. ✅ extract_pages_from_alert() - Enhanced to use Path: field
+  5. ✅ parse_alert() - Updated to call all extraction functions
+  6. ✅ aggregator - Updated to display Threshold and Time Window
+
+💾 Output saved to: integration_test_output.txt
