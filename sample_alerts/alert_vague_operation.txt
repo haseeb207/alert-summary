@@ -1,0 +1,11 @@
+[P3] Warn: Custom integration timeout - Payment gateway slow
+
+Alert Details:
+- Service: buy-www.mattressfirm-com.vercel.app
+- Path: /checkout
+- Duration Threshold: >3000ms
+- Time Window: Last 1 hour
+- Count: 5.0
+
+The checkout flow is calling an external payment provider; the operation name was not in our standard list.
+Related Logs [https://app.datadoghq.com/logs?query=...]

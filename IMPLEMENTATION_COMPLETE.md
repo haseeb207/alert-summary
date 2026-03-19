@@ -148,6 +148,16 @@ The implementation is **complete and tested**. Ready for:
 3. **Teams webhook posting** - Verify message format looks good in Teams before enabling automatic posts
 4. **File archival** - Once satisfied with output, enable automatic file movement to `/archive` and `/failed` folders
 
+## Ollama AI Enhancement (Optional)
+
+- **Module**: `ollama_client.py` — `get_operation_from_alert(raw_text)` and `get_period_summary_sentence(operations_with_counts)` call Ollama at `OLLAMA_BASE_URL` (default `http://localhost:11434`) via `/api/generate` with `stream: false`. Alert text is truncated to 2500 chars; timeouts and errors are handled without retries.
+- **Agent integration**: In `agent.py`, when `OLLAMA_ENABLED` is true:
+  - After parsing an alert, if operation is `Unknown`, `Commerce`, `Checkout`, or `Parse Error`, the agent optionally calls `get_operation_from_alert()` and uses the result (if non-empty, ≤80 chars, no newlines) as the operation name.
+  - After generating the period summary, if `OLLAMA_NARRATIVE_SUMMARY_ENABLED` is true and there are active alerts, the agent builds operation counts from the aggregated data, calls `get_period_summary_sentence()`, and prepends `**AI summary:** {sentence}` to the Teams message.
+- **Startup**: If Ollama is enabled, `check_ollama_available()` runs at startup (GET `/api/tags`); a warning is logged if unreachable, but startup is not blocked.
+- **Config**: `.env.example` documents `OLLAMA_ENABLED`, `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `OLLAMA_TIMEOUT_SECONDS`, `OLLAMA_OPERATION_EXTRACTION_ENABLED`, `OLLAMA_NARRATIVE_SUMMARY_ENABLED`.
+- **Test**: `python test_ollama.py` runs health check, operation extraction on a sample snippet, and narrative summary on a small list.
+
 ## Code Quality
 
 - ✅ All functions have docstrings
