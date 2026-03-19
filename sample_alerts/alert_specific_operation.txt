@@ -1,0 +1,11 @@
+[P3] Warn: API Profiling - Cart - (Graphql API) High duration detected for removeCartLines
+
+Alert Details:
+- Service: buy-www.mattressfirm-com.vercel.app
+- Path: /cart
+- GraphQL: removeCartLines
+- Duration Threshold: >1500ms (1.5 seconds)
+- Time Window: Last 1 hour
+- Count: 10.0
+
+Related Logs [https://app.datadoghq.com/logs?query=...]

@@ -81,7 +81,18 @@ mkdir -p "$(eval echo $WATCH_DIR)/failed"
 
 ### 4. Run the Agent
 
+**Option A – run script (uses project venv automatically, no activation needed):**
+
 ```bash
+cd /path/to/email-agent
+./run_agent.sh
+```
+
+**Option B – manual (with venv already activated):**
+
+```bash
+cd /path/to/email-agent
+source venv/bin/activate   # or: source .venv/bin/activate
 python agent.py
 ```
 
@@ -116,6 +127,23 @@ All settings are read from `.env` (copy from `.env.example`). Every option is li
 | **SUMMARY_MODE** | Format of the period summary posted to Teams: `full` (detailed per-alert breakdown) or `simple` (time lines + compact table). | `full` |
 | **SUMMARY_TABLE_GROUP_BY_PAGE** | Only applies when `SUMMARY_MODE=simple`. If `true`, table has one row per (alert, page); if `false`, one row per alert with comma-separated pages. | `false` |
 | **DRY_RUN** | If `true`, summaries are logged but not posted to Teams. Use for testing. | `false` |
+| **OLLAMA_ENABLED** | If `true`, enable optional Ollama AI (operation name extraction and/or narrative summary). Requires Ollama running locally. | `false` |
+| **OLLAMA_BASE_URL** | Ollama API base URL. | `http://localhost:11434` |
+| **OLLAMA_MODEL** | Model name (must be pulled in Ollama, e.g. `ollama run llama3.2`). | `llama3.2` |
+| **OLLAMA_TIMEOUT_SECONDS** | Timeout for Ollama generate calls. | `20` |
+| **OLLAMA_OPERATION_EXTRACTION_ENABLED** | When true (and OLLAMA_ENABLED), call Ollama to improve vague operation names (Unknown, Commerce, Checkout) from raw email text. | `true` when OLLAMA_ENABLED |
+| **OLLAMA_NARRATIVE_SUMMARY_ENABLED** | When true (and OLLAMA_ENABLED), add a one-sentence AI-generated summary at the top of the period report. | `false` |
+
+### Optional: Ollama AI
+
+When `OLLAMA_ENABLED=true`, the agent can use a local [Ollama](https://ollama.ai/) instance for two optional features:
+
+1. **Operation name extraction**: If the regex parser yields a vague name (`Unknown`, `Commerce`, `Checkout`, or `Parse Error`), the agent sends a truncated copy of the alert email to Ollama and uses the model's reply as the operation name. This reduces vague entries in the summary table and database.
+2. **Narrative summary**: If `OLLAMA_NARRATIVE_SUMMARY_ENABLED=true`, the agent asks Ollama to generate one short sentence summarizing the period's alert counts and prepends it to the Teams message (e.g. "Cart and checkout APIs had elevated latency; 3 new alerts, 2 recovered.").
+
+**Requirements**: Ollama must be running on the same machine (e.g. `ollama serve`) and the configured model must be pulled (e.g. `ollama run llama3.2`). If Ollama is unreachable at startup or at call time, the agent logs a warning and continues without AI (regex-only parsing, no narrative line). No API keys or cloud dependency.
+
+**Test script**: Run `python test_ollama.py` to exercise all Ollama enhancement points: health check, operation extraction from alert files (same as agent), narrative summary from mock and from DB-aggregated data, and a full parse→Ollama→narrative pipeline. Optional: `python test_ollama.py /path/to/alert/txt/files` to use your own alert directory.
 
 ### Summary modes: full vs simple
 
@@ -164,6 +192,7 @@ watch_dir/
 | **Aggregation** | `PeriodAggregator.check_and_report()` | Elapsed-time windows; aggregates and posts every N seconds |
 | **Teams Posting** | `send_to_teams()` | Office 365 Message Card, 3 retries with exponential backoff |
 | **Database** | `database` module | SQLite: alerts, alert_periods, page_correlations, agent_state, posted_periods; cleanup by retention |
+| **Ollama AI (optional)** | `ollama_client` | Operation name enrichment for vague regex results; optional one-sentence narrative summary for period reports |
 | **Logging** | `setup_logging()` | Rotating file (10MB, 5 backups) + console |
 
 ### Database Schema
@@ -278,6 +307,10 @@ If the watch directory is under OneDrive (e.g. `Library/CloudStorage/OneDrive-..
 ### Run in background (macOS)
 
 ```bash
+# Using the run script (picks venv automatically)
+nohup ./run_agent.sh >> logs/agent.log 2>&1 &
+
+# Or explicitly with venv
 nohup ./venv/bin/python agent.py >> logs/agent.log 2>&1 &
 ```
 

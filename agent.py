@@ -24,6 +24,7 @@ from dotenv import load_dotenv
 import database
 import alert_parser
 import aggregator
+import ollama_client
 
 # Ensure all agent processes use the same DB (avoid duplicate reports from multiple instances)
 _AGENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -62,6 +63,11 @@ WEBHOOK_RETRY_DELAYS = [1, 2, 4]  # Exponential backoff in seconds
 # File stabilization configuration
 FILE_STABILITY_CHECK_INTERVAL = 0.5  # seconds
 FILE_STABILITY_THRESHOLD = 1.0  # seconds of no size change
+
+# Ollama AI (optional) - local LLM for operation name enrichment and narrative summary
+OLLAMA_ENABLED = (os.getenv('OLLAMA_ENABLED', 'false') or 'false').lower() == 'true'
+OLLAMA_OPERATION_EXTRACTION_ENABLED = (os.getenv('OLLAMA_OPERATION_EXTRACTION_ENABLED', 'true') or 'true').lower() == 'true'
+OLLAMA_NARRATIVE_SUMMARY_ENABLED = (os.getenv('OLLAMA_NARRATIVE_SUMMARY_ENABLED', 'false') or 'false').lower() == 'true'
 
 
 # ============================================================================
@@ -221,6 +227,15 @@ def process_alert_file(filepath):
         # Parse alert
         filename = Path(filepath).name
         parsed = alert_parser.parse_alert(alert_text, filename)
+        
+        # Optional: use Ollama to improve vague operation names
+        if OLLAMA_ENABLED and OLLAMA_OPERATION_EXTRACTION_ENABLED:
+            vague = ('Unknown', 'Commerce', 'Checkout', 'Parse Error')
+            if parsed.get('operation') in vague:
+                ai_operation = ollama_client.get_operation_from_alert(alert_text)
+                if ai_operation and len(ai_operation) <= 80 and '\n' not in ai_operation:
+                    parsed['operation'] = ai_operation
+                    logger.info(f"AI overrode operation name to: {ai_operation}")
         
         # Store in database
         database.insert_alert(
@@ -460,6 +475,18 @@ class PeriodAggregator:
             period_label=period_label,
             use_simple=use_simple
         )
+        
+        # Optional: prepend one-sentence AI summary
+        if OLLAMA_ENABLED and OLLAMA_NARRATIVE_SUMMARY_ENABLED and summary and "No active alerts" not in summary:
+            op_counts = {}
+            for key, data in aggregated.items():
+                op = key[0] if isinstance(key, tuple) else key
+                op_counts[op] = op_counts.get(op, 0) + data.get('count', 0)
+            ops_with_counts = list(op_counts.items())
+            ops_with_counts.sort(key=lambda x: -x[1])  # by count descending for richer AI summary
+            ai_sentence = ollama_client.get_period_summary_sentence(ops_with_counts)
+            if ai_sentence:
+                summary = f"**AI summary:** {ai_sentence}\n\n{summary}"
         
         # Idempotent post: only one message per period (guards against any duplicate claim/process)
         period_start_str = period_start.strftime('%Y-%m-%d %H:%M:%S')
@@ -711,6 +738,12 @@ def main():
     if not validate_startup():
         logger.error("Startup validation failed. Exiting.")
         sys.exit(1)
+    
+    # Optional: warn if Ollama is enabled but unreachable (do not block startup)
+    if OLLAMA_ENABLED and not ollama_client.check_ollama_available():
+        logger.warning("Ollama is enabled but unreachable; AI features will be skipped until Ollama is available.")
+    elif OLLAMA_ENABLED:
+        logger.info("Ollama AI enabled (operation extraction and/or narrative summary)")
     
     # Single-instance lock: prevent duplicate reports from multiple agent processes
     if not acquire_pid_lock():

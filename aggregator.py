@@ -54,6 +54,22 @@ def format_period_label(period_str: str) -> str:
     return "1 hour"
 
 
+def format_actual_duration_label(period_start: datetime, period_end: datetime) -> str:
+    """Compute actual window duration and return a short human-readable label (e.g. '15 hours', '14h 58m')."""
+    delta = period_end - period_start
+    total_seconds = max(0, int(delta.total_seconds()))
+    if total_seconds < 60:
+        return "under 1 minute"
+    if total_seconds < 3600:
+        minutes = total_seconds // 60
+        return f"{minutes} minute{'s' if minutes != 1 else ''}"
+    hours = total_seconds // 3600
+    remainder_mins = (total_seconds % 3600) // 60
+    if remainder_mins == 0:
+        return f"{hours} hour{'s' if hours != 1 else ''}"
+    return f"{hours}h {remainder_mins}m"
+
+
 def _format_time_12h(dt_utc: datetime, tz_name: str) -> str:
     """Format a UTC datetime in the given timezone as 12-hour am/pm (e.g. '9:00 pm')."""
     if dt_utc.tzinfo is None:
@@ -76,17 +92,33 @@ def _format_time_12h(dt_utc: datetime, tz_name: str) -> str:
     return f"{hour_12}:{m:02d} {am_pm}"
 
 
+def _format_time_12h_with_date(dt_utc: datetime, tz_name: str) -> str:
+    """Format a UTC datetime in the given timezone as 'Mar 10 9:00 pm' (short date + 12h time)."""
+    if dt_utc.tzinfo is None:
+        dt_utc = dt_utc.replace(tzinfo=ZoneInfo('UTC'))
+    local = dt_utc.astimezone(ZoneInfo(tz_name))
+    time_part = _format_time_12h(dt_utc, tz_name)
+    date_part = local.strftime("%b ") + str(local.day)  # e.g. "Mar 10"
+    return f"{date_part} {time_part}"
+
+
 def format_period_in_timezones(period_start: datetime, period_end: datetime) -> List[str]:
     """
     Format the agent's reporting window in EST, CST, and UTC (12-hour am/pm).
     period_start and period_end are in UTC.
+    When the window crosses midnight (UTC), includes short date (e.g. 'Mar 10 1:56 am – Mar 11 4:54 pm').
     Returns a list of lines, e.g.:
       ['EST: 9:00 pm to 11:00 pm', 'CST: 8:00 pm to 10:00 pm', 'UTC: 2:00 am to 4:00 am']
     """
+    cross_day = period_start.date() != period_end.date()
     lines = []
     for label, tz_name in [('EST', 'America/New_York'), ('CST', 'America/Chicago'), ('UTC', 'UTC')]:
-        start_str = _format_time_12h(period_start, tz_name)
-        end_str = _format_time_12h(period_end, tz_name)
+        if cross_day:
+            start_str = _format_time_12h_with_date(period_start, tz_name)
+            end_str = _format_time_12h_with_date(period_end, tz_name)
+        else:
+            start_str = _format_time_12h(period_start, tz_name)
+            end_str = _format_time_12h(period_end, tz_name)
         lines.append(f"{label}: {start_str} to {end_str}")
     return lines
 
@@ -213,7 +245,8 @@ def generate_simple_period_summary(period_start: datetime, period_end: datetime,
         return "✅ **No active alerts in this period**\n"
     
     lines = []
-    lines.append(f"**Summary for last {period_label}**")
+    actual_label = format_actual_duration_label(period_start, period_end)
+    lines.append(f"**Summary for last {actual_label}**")
     for line in format_period_in_timezones(period_start, period_end):
         lines.append(line)
     lines.append("")
@@ -224,7 +257,10 @@ def generate_simple_period_summary(period_start: datetime, period_end: datetime,
     else:
         lines.append("| Alert name | Page(s) | Subject | Number of alerts |")
         lines.append("| --- | --- | --- | --- |")
-    for key, data in sorted(aggregated_alerts.items()):
+    # Sort by count descending, then by key for tiebreak
+    sorted_items = sorted(aggregated_alerts.items(), key=lambda x: (-x[1]['count'], x[0]))
+    total_count = 0
+    for key, data in sorted_items:
         if len(key) == 3:
             operation, service, page = key
             pages = [page]
@@ -261,6 +297,12 @@ def generate_simple_period_summary(period_start: datetime, period_end: datetime,
             lines.append(f"| {op_cell} | {pages_cell_safe} | {subject_cell} | {count} | {related_cell} |")
         else:
             lines.append(f"| {op_cell} | {pages_cell_safe} | {subject_cell} | {count} |")
+        total_count += count
+    # Total row
+    if include_related_logs:
+        lines.append(f"| **Total** | — | — | **{total_count}** | — |")
+    else:
+        lines.append(f"| **Total** | — | — | **{total_count}** |")
     return "\n".join(lines)
 
 
@@ -281,7 +323,8 @@ def generate_period_summary(period_start: datetime, period_end: datetime,
         return "✅ **No active alerts in this period**\n"
 
     summary_lines = []
-    summary_lines.append(f"**Summary for last {period_label}**")
+    actual_label = format_actual_duration_label(period_start, period_end)
+    summary_lines.append(f"**Summary for last {actual_label}**")
     for line in format_period_in_timezones(period_start, period_end):
         summary_lines.append(line)
     summary_lines.append("")
