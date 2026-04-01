@@ -133,13 +133,19 @@ All settings are read from `.env` (copy from `.env.example`). Every option is li
 | **OLLAMA_TIMEOUT_SECONDS** | Timeout for Ollama generate calls. | `20` |
 | **OLLAMA_OPERATION_EXTRACTION_ENABLED** | When true (and OLLAMA_ENABLED), call Ollama to improve vague operation names (Unknown, Commerce, Checkout) from raw email text. | `true` when OLLAMA_ENABLED |
 | **OLLAMA_NARRATIVE_SUMMARY_ENABLED** | When true (and OLLAMA_ENABLED), add a one-sentence AI-generated summary at the top of the period report. | `false` |
+| **OLLAMA_HISTORY_INSIGHT_ENABLED** | When true (and OLLAMA_ENABLED), add a short AI line comparing the current period to earlier rows in the retention window; output is validated against known operation names. | `false` |
+| **RETENTION_TOP_ALERTS_ENABLED** | When true, prepend a deterministic **Top N** list of operation names by stored alert count over the last `HISTORY_RETENTION_DAYS` (no AI). | `true` |
+| **RETENTION_TOP_ALERTS_LIMIT** | How many operations to show in that list (1–20). | `5` |
 
 ### Optional: Ollama AI
 
-When `OLLAMA_ENABLED=true`, the agent can use a local [Ollama](https://ollama.ai/) instance for two optional features:
+When `OLLAMA_ENABLED=true`, the agent can use a local [Ollama](https://ollama.ai/) instance for optional features:
 
 1. **Operation name extraction**: If the regex parser yields a vague name (`Unknown`, `Commerce`, `Checkout`, or `Parse Error`), the agent sends a truncated copy of the alert email to Ollama and uses the model's reply as the operation name. This reduces vague entries in the summary table and database.
-2. **Narrative summary**: If `OLLAMA_NARRATIVE_SUMMARY_ENABLED=true`, the agent asks Ollama to generate one short sentence summarizing the period's alert counts and prepends it to the Teams message (e.g. "Cart and checkout APIs had elevated latency; 3 new alerts, 2 recovered.").
+2. **Narrative summary**: If `OLLAMA_NARRATIVE_SUMMARY_ENABLED=true`, the agent asks Ollama for one short sentence summarizing the period's alert counts and prepends it to the Teams message. The prompt instructs the model to use the **exact operation/API names** from the aggregated list (not vague labels like "cart management").
+3. **Period vs prior insight**: If `OLLAMA_HISTORY_INSIGHT_ENABLED=true`, the agent sends the current period’s operation counts and the top operations from **before** this period (still within the retention window) to Ollama. The reply is limited to two sentences and is **dropped** if validation detects tokens that are not allowed operation names or an approved word list (reduces hallucinations in Teams).
+
+**Retention leaderboard (no AI)**: When `RETENTION_TOP_ALERTS_ENABLED=true`, each report can start with **Top N alerts in past X days** (X = `HISTORY_RETENTION_DAYS`), built only from SQLite counts—same operation names as in your table.
 
 **Requirements**: Ollama must be running on the same machine (e.g. `ollama serve`) and the configured model must be pulled (e.g. `ollama run llama3.2`). If Ollama is unreachable at startup or at call time, the agent logs a warning and continues without AI (regex-only parsing, no narrative line). No API keys or cloud dependency.
 
@@ -190,7 +196,7 @@ watch_dir/
 | **Stabilization** | `wait_for_file_stability()` | Waits for file size to be stable before reading |
 | **Parser** | `alert_parser.parse_alert()` | Extracts operation, service, severity, condition, count, time_window, affected_pages, related_logs_url |
 | **Aggregation** | `PeriodAggregator.check_and_report()` | Elapsed-time windows; aggregates and posts every N seconds |
-| **Teams Posting** | `send_to_teams()` | Office 365 Message Card, 3 retries with exponential backoff |
+| **Teams Posting** | `send_to_teams()` | Office 365 Message Card (Markdown); period time ranges use list items (`* EST: …`) so each timezone renders on its own line in Teams |
 | **Database** | `database` module | SQLite: alerts, alert_periods, page_correlations, agent_state, posted_periods; cleanup by retention |
 | **Ollama AI (optional)** | `ollama_client` | Operation name enrichment for vague regex results; optional one-sentence narrative summary for period reports |
 | **Logging** | `setup_logging()` | Rotating file (10MB, 5 backups) + console |

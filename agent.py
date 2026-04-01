@@ -12,7 +12,7 @@ import time
 import signal
 import logging
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
 
 import requests
@@ -68,6 +68,14 @@ FILE_STABILITY_THRESHOLD = 1.0  # seconds of no size change
 OLLAMA_ENABLED = (os.getenv('OLLAMA_ENABLED', 'false') or 'false').lower() == 'true'
 OLLAMA_OPERATION_EXTRACTION_ENABLED = (os.getenv('OLLAMA_OPERATION_EXTRACTION_ENABLED', 'true') or 'true').lower() == 'true'
 OLLAMA_NARRATIVE_SUMMARY_ENABLED = (os.getenv('OLLAMA_NARRATIVE_SUMMARY_ENABLED', 'false') or 'false').lower() == 'true'
+OLLAMA_HISTORY_INSIGHT_ENABLED = (os.getenv('OLLAMA_HISTORY_INSIGHT_ENABLED', 'false') or 'false').lower() == 'true'
+
+# Top N operations by count in the retention window (deterministic; no AI)
+RETENTION_TOP_ALERTS_ENABLED = (os.getenv('RETENTION_TOP_ALERTS_ENABLED', 'true') or 'true').lower() == 'true'
+try:
+    RETENTION_TOP_ALERTS_LIMIT = max(1, min(20, int(os.getenv('RETENTION_TOP_ALERTS_LIMIT', '5'))))
+except ValueError:
+    RETENTION_TOP_ALERTS_LIMIT = 5
 
 
 # ============================================================================
@@ -475,22 +483,52 @@ class PeriodAggregator:
             period_label=period_label,
             use_simple=use_simple
         )
-        
-        # Optional: prepend one-sentence AI summary
-        if OLLAMA_ENABLED and OLLAMA_NARRATIVE_SUMMARY_ENABLED and summary and "No active alerts" not in summary:
-            op_counts = {}
-            for key, data in aggregated.items():
-                op = key[0] if isinstance(key, tuple) else key
-                op_counts[op] = op_counts.get(op, 0) + data.get('count', 0)
-            ops_with_counts = list(op_counts.items())
-            ops_with_counts.sort(key=lambda x: -x[1])  # by count descending for richer AI summary
-            ai_sentence = ollama_client.get_period_summary_sentence(ops_with_counts)
-            if ai_sentence:
-                summary = f"**AI summary:** {ai_sentence}\n\n{summary}"
-        
-        # Idempotent post: only one message per period (guards against any duplicate claim/process)
+
+        # Operation counts for this period (AI + retention blocks)
+        op_counts = {}
+        for key, data in aggregated.items():
+            op = key[0] if isinstance(key, tuple) else key
+            op_counts[op] = op_counts.get(op, 0) + data.get('count', 0)
+        ops_with_counts = sorted(op_counts.items(), key=lambda x: -x[1])
+
         period_start_str = period_start.strftime('%Y-%m-%d %H:%M:%S')
         period_end_str = period_end.strftime('%Y-%m-%d %H:%M:%S')
+        now_utc = datetime.utcnow()
+        retention_start_str = (now_utc - timedelta(days=HISTORY_RETENTION_DAYS)).strftime('%Y-%m-%d %H:%M:%S')
+        now_str = now_utc.strftime('%Y-%m-%d %H:%M:%S')
+
+        prefix_parts = []
+
+        # Deterministic: top operations across the configured retention window (stored alert rows)
+        if RETENTION_TOP_ALERTS_ENABLED and summary and "No active alerts" not in summary:
+            top_retention = database.get_top_operations_in_range(
+                retention_start_str, now_str, RETENTION_TOP_ALERTS_LIMIT, end_inclusive=True
+            )
+            top_block = aggregator.format_retention_top_alerts_markdown(
+                top_retention, HISTORY_RETENTION_DAYS, RETENTION_TOP_ALERTS_LIMIT
+            )
+            if top_block:
+                prefix_parts.append(top_block.strip())
+
+        # Optional: one-sentence AI summary for current period
+        if OLLAMA_ENABLED and OLLAMA_NARRATIVE_SUMMARY_ENABLED and summary and "No active alerts" not in summary:
+            ai_sentence = ollama_client.get_period_summary_sentence(ops_with_counts)
+            if ai_sentence:
+                prefix_parts.append(f"**AI summary:** {ai_sentence}")
+
+        # Optional: AI compares current period to prior rows in retention window (validated output)
+        if OLLAMA_ENABLED and OLLAMA_HISTORY_INSIGHT_ENABLED and summary and "No active alerts" not in summary:
+            prior_top = database.get_top_operations_in_range(
+                retention_start_str, period_start_str, 15, end_inclusive=False
+            )
+            insight = ollama_client.get_period_history_insight(ops_with_counts, prior_top)
+            if insight:
+                prefix_parts.append(f"**Period vs prior data:** {insight}")
+
+        if prefix_parts:
+            summary = "\n\n".join(prefix_parts) + "\n\n" + summary
+
+        # Idempotent post: only one message per period (guards against any duplicate claim/process)
         if not database.try_record_posted_period(period_start_str, period_end_str):
             logger.warning(f"Already posted for period {period_start_str} - {period_end_str}, skipping Teams post")
             return True
@@ -728,6 +766,10 @@ def main():
     logger.info(f"  Watch Directory: {WATCH_DIR}")
     logger.info(f"  Aggregation Period: {AGGREGATION_PERIOD_STR}")
     logger.info(f"  History Retention: {HISTORY_RETENTION_DAYS} days")
+    logger.info(
+        f"  Retention top alerts (Teams): {'on' if RETENTION_TOP_ALERTS_ENABLED else 'off'} "
+        f"(top {RETENTION_TOP_ALERTS_LIMIT} by count in retention window)"
+    )
     logger.info(f"  Summary Mode: {SUMMARY_MODE} (full=detailed, simple=table)")
     logger.info(f"  Teams Webhook: {'configured' if TEAMS_WEBHOOK_URL else 'NOT CONFIGURED'}")
     if DRY_RUN:
@@ -743,7 +785,10 @@ def main():
     if OLLAMA_ENABLED and not ollama_client.check_ollama_available():
         logger.warning("Ollama is enabled but unreachable; AI features will be skipped until Ollama is available.")
     elif OLLAMA_ENABLED:
-        logger.info("Ollama AI enabled (operation extraction and/or narrative summary)")
+        logger.info(
+            "Ollama AI enabled (operation extraction / narrative summary / "
+            f"history insight: {'on' if OLLAMA_HISTORY_INSIGHT_ENABLED else 'off'})"
+        )
     
     # Single-instance lock: prevent duplicate reports from multiple agent processes
     if not acquire_pid_lock():

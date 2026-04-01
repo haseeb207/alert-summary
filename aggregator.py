@@ -70,6 +70,27 @@ def format_actual_duration_label(period_start: datetime, period_end: datetime) -
     return f"{hours}h {remainder_mins}m"
 
 
+def format_retention_top_alerts_markdown(
+    top_ops: List[Tuple[str, int]],
+    retention_days: int,
+    top_n: int = 5,
+) -> str:
+    """
+    Deterministic Markdown block: top operations by stored alert count in the retention window.
+    No AI; safe for Teams. Empty if no rows.
+    """
+    if not top_ops:
+        return ""
+    n = min(len(top_ops), top_n)
+    lines = [
+        f"**Top {n} alerts in past {retention_days} days** (by stored alert count)",
+    ]
+    for op, cnt in top_ops[:n]:
+        safe_op = (op or "Unknown").replace("|", "\\|")
+        lines.append(f"* `{safe_op}` — {cnt}")
+    return "\n".join(lines) + "\n\n"
+
+
 def _format_time_12h(dt_utc: datetime, tz_name: str) -> str:
     """Format a UTC datetime in the given timezone as 12-hour am/pm (e.g. '9:00 pm')."""
     if dt_utc.tzinfo is None:
@@ -107,8 +128,9 @@ def format_period_in_timezones(period_start: datetime, period_end: datetime) -> 
     Format the agent's reporting window in EST, CST, and UTC (12-hour am/pm).
     period_start and period_end are in UTC.
     When the window crosses midnight (UTC), includes short date (e.g. 'Mar 10 1:56 am – Mar 11 4:54 pm').
+    Each line is a Markdown list item (* ...) so Microsoft Teams Message Cards render one timezone per line.
     Returns a list of lines, e.g.:
-      ['EST: 9:00 pm to 11:00 pm', 'CST: 8:00 pm to 10:00 pm', 'UTC: 2:00 am to 4:00 am']
+      ['* EST: 9:00 pm to 11:00 pm', '* CST: 8:00 pm to 10:00 pm', '* UTC: 2:00 am to 4:00 am']
     """
     cross_day = period_start.date() != period_end.date()
     lines = []
@@ -119,7 +141,7 @@ def format_period_in_timezones(period_start: datetime, period_end: datetime) -> 
         else:
             start_str = _format_time_12h(period_start, tz_name)
             end_str = _format_time_12h(period_end, tz_name)
-        lines.append(f"{label}: {start_str} to {end_str}")
+        lines.append(f"* {label}: {start_str} to {end_str}")
     return lines
 
 
@@ -244,12 +266,10 @@ def generate_simple_period_summary(period_start: datetime, period_end: datetime,
     if not aggregated_alerts:
         return "✅ **No active alerts in this period**\n"
     
-    lines = []
     actual_label = format_actual_duration_label(period_start, period_end)
-    lines.append(f"**Summary for last {actual_label}**")
-    for line in format_period_in_timezones(period_start, period_end):
-        lines.append(line)
-    lines.append("")
+    tz_block = "\n".join(format_period_in_timezones(period_start, period_end))
+    # Paragraph break after title + Markdown bullets for Teams line breaks
+    lines = [f"**Summary for last {actual_label}**\n\n{tz_block}", ""]
     # Table: Alert name | Page(s) | Subject | Number of alerts | [Related logs]
     if include_related_logs:
         lines.append("| Alert name | Page(s) | Subject | Number of alerts | Related logs |")
@@ -324,9 +344,8 @@ def generate_period_summary(period_start: datetime, period_end: datetime,
 
     summary_lines = []
     actual_label = format_actual_duration_label(period_start, period_end)
-    summary_lines.append(f"**Summary for last {actual_label}**")
-    for line in format_period_in_timezones(period_start, period_end):
-        summary_lines.append(line)
+    tz_block = "\n".join(format_period_in_timezones(period_start, period_end))
+    summary_lines.append(f"**Summary for last {actual_label}**\n\n{tz_block}")
     summary_lines.append("")
     summary_lines.append("*Only triggered (non-recovered) alerts are included.*\n")
 
