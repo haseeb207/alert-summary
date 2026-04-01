@@ -66,7 +66,7 @@ def test_same_day_time_format():
     start = datetime(2026, 3, 11, 14, 0, 0)
     end = datetime(2026, 3, 11, 19, 0, 0)
     lines = format_period_in_timezones(start, end)
-    assert len(lines) == 3 and "EST:" in lines[0], "Should have EST/CST/UTC"
+    assert len(lines) == 3 and lines[0].startswith("* EST:"), "Should have Markdown bullet per timezone"
     # No "Mar" in same-day (times only)
     assert all("Mar" not in line for line in lines), "Same-day should not include date"
     print("  OK same-day time format")
@@ -89,6 +89,7 @@ def test_simple_summary_header_and_total():
     aggregated = _make_aggregated()
     summary = generate_simple_period_summary(start, end, aggregated, "1 hour", include_related_logs=True)
     assert "Summary for last 5 hours" in summary, f"Header should show actual 5h window: {summary[:200]!r}"
+    assert "* EST:" in summary and "* CST:" in summary and "* UTC:" in summary, "Timezone block should use Markdown bullets for Teams"
     assert "**Total**" in summary, "Should have Total row"
     assert "**19**" in summary, "Total should be 1+16+2=19"
     print("  OK header and total row")

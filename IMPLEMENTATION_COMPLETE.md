@@ -153,10 +153,13 @@ The implementation is **complete and tested**. Ready for:
 - **Module**: `ollama_client.py` — `get_operation_from_alert(raw_text)` and `get_period_summary_sentence(operations_with_counts)` call Ollama at `OLLAMA_BASE_URL` (default `http://localhost:11434`) via `/api/generate` with `stream: false`. Alert text is truncated to 2500 chars; timeouts and errors are handled without retries.
 - **Agent integration**: In `agent.py`, when `OLLAMA_ENABLED` is true:
   - After parsing an alert, if operation is `Unknown`, `Commerce`, `Checkout`, or `Parse Error`, the agent optionally calls `get_operation_from_alert()` and uses the result (if non-empty, ≤80 chars, no newlines) as the operation name.
-  - After generating the period summary, if `OLLAMA_NARRATIVE_SUMMARY_ENABLED` is true and there are active alerts, the agent builds operation counts from the aggregated data, calls `get_period_summary_sentence()`, and prepends `**AI summary:** {sentence}` to the Teams message.
+  - After generating the period summary, if `OLLAMA_NARRATIVE_SUMMARY_ENABLED` is true and there are active alerts, the agent builds operation counts from the aggregated data, calls `get_period_summary_sentence()`, and prepends `**AI summary:** {sentence}` to the Teams message. The narrative prompt requires **exact operation/API names** as in the list (no generic "cart management" style paraphrasing).
+- **Teams formatting**: Period summaries format EST/CST/UTC as Markdown bullet lines (`* EST: …`) with a paragraph break after the title so Microsoft Teams Message Cards show each timezone on a separate line.
 - **Startup**: If Ollama is enabled, `check_ollama_available()` runs at startup (GET `/api/tags`); a warning is logged if unreachable, but startup is not blocked.
 - **Config**: `.env.example` documents `OLLAMA_ENABLED`, `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `OLLAMA_TIMEOUT_SECONDS`, `OLLAMA_OPERATION_EXTRACTION_ENABLED`, `OLLAMA_NARRATIVE_SUMMARY_ENABLED`.
 - **Test**: `python test_ollama.py` runs health check, operation extraction on a sample snippet, and narrative summary on a small list.
+- **Retention leaderboard**: `database.get_top_operations_in_range()` plus `aggregator.format_retention_top_alerts_markdown()` prepends the top N operation names by row count over `HISTORY_RETENTION_DAYS` (`RETENTION_TOP_ALERTS_*` in `.env`).
+- **History insight**: `ollama_client.get_period_history_insight()` compares current-period counts to prior rows in the retention window (`OLLAMA_HISTORY_INSIGHT_ENABLED`); `validate_history_insight_text()` rejects replies that introduce unknown identifier-like words after masking known operations.
 
 ## Code Quality
 

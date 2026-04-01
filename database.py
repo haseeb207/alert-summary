@@ -177,6 +177,39 @@ def get_alert_count_total():
         return 0
 
 
+def get_top_operations_in_range(
+    period_start_str: str,
+    period_end_str: str,
+    limit: int = 5,
+    end_inclusive: bool = True,
+):
+    """
+    Count alerts by operation in a time window (by alert_timestamp, UTC strings 'YYYY-MM-DD HH:MM:SS').
+    If end_inclusive is True, uses <= on the end bound; if False, uses < (exclusive end).
+    Returns [(operation, count), ...] sorted by count descending.
+    """
+    if limit < 1:
+        return []
+    end_op = "<=" if end_inclusive else "<"
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""
+                SELECT operation, COUNT(*) AS cnt FROM alerts
+                WHERE alert_timestamp >= ? AND alert_timestamp {end_op} ?
+                GROUP BY operation
+                ORDER BY cnt DESC
+                LIMIT ?
+                """,
+                (period_start_str, period_end_str, limit),
+            )
+            return [(row[0], int(row[1])) for row in cursor.fetchall()]
+    except Exception as e:
+        logger.error(f"Error querying top operations in range: {e}", exc_info=True)
+        return []
+
+
 def get_alerts_in_period(period_start, period_end):
     """Get all alerts within a specific time period (by insert time, UTC)."""
     try:
